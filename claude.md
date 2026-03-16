@@ -318,5 +318,10 @@ ADA, AVAX, LINK, DOT, TRX, SOL, ATOM, NEAR, ALGO, UNI, ICP, HBAR, SAND, MANA, TH
 - [ ] neo_flow/binance_client.py — Exchange wrapper
 - [ ] run_scanner.py — CLI test scanner
 - [ ] run_live.py — Live trading runner
-- [ ] Backtesting framework
-- [ ] Parameter optimization
+- [x] backtest/data_loader.py — Data preloading, numpy arrays, WFV fold generation
+- [x] backtest/engine.py — Core backtest loop, trade management, trailing stops
+- [x] backtest/metrics.py — Performance metrics, reporting, CSV export
+- [x] backtest/optimize.py — Optuna TPE optimization + WFV orchestration
+- [x] run_backtest.py — CLI runner (single run, WFV, Optuna optimize, blind test)
+- [ ] Parameter optimization (run --optimize with Optuna)
+- [ ] Walk-forward validation (run --wfv or --optimize)
