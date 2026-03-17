@@ -611,12 +611,14 @@ class LiveBot:
 
         save_state(self.state)
 
-    def _scan_and_enter(self, all_data: dict):
+    def _scan_and_enter(self, all_data: dict, skip_assets: set = None):
         """Scan all assets and open positions for qualifying signals."""
         from neo_flow.adaptive_engine import (
             scan_asset, compute_atr, compute_hard_sl, get_leverage,
         )
         from backtest.data_loader import build_scan_dataframes, build_htf_dataframe
+
+        skip_assets = skip_assets or set()
 
         if len(self.state.positions) >= MAX_CONCURRENT:
             logger.info("Max concurrent positions reached (%d) — skipping scan", MAX_CONCURRENT)
@@ -627,6 +629,9 @@ class LiveBot:
 
         for asset in ASSETS:
             if asset in self.state.positions:
+                continue
+            if asset in skip_assets:
+                logger.info("Skipping %s — closed this cycle (cooldown)", asset)
                 continue
             if len(self.state.positions) >= MAX_CONCURRENT:
                 break
@@ -775,12 +780,17 @@ class LiveBot:
         logger.info("Data fetched in %.1fs (%d assets loaded)", elapsed, len(all_data))
 
         # Check exits on open positions
+        closed_this_cycle = set()
         if self.state.positions:
             logger.info("Checking %d open positions for exits...", len(self.state.positions))
+            before = set(self.state.positions.keys())
             self._check_exits(all_data)
+            closed_this_cycle = before - set(self.state.positions.keys())
+            if closed_this_cycle:
+                logger.info("Closed this cycle: %s — cooldown, no re-entry", closed_this_cycle)
 
-        # Scan for new entries
-        self._scan_and_enter(all_data)
+        # Scan for new entries (skip assets closed this cycle)
+        self._scan_and_enter(all_data, skip_assets=closed_this_cycle)
 
         # Summary
         equity = self.state.initial_capital + self.state.realized_pnl
