@@ -140,19 +140,26 @@ def tg_send(text: str, parse_mode: str = "HTML"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Live Data Fetcher (real-time candles via Binance REST)
+# Live Data: Parquet Cache + Binance API for new bars
 # ═══════════════════════════════════════════════════════════════════════════════
 
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
-def fetch_recent_klines(symbol: str, interval: str, limit: int = 500) -> pd.DataFrame:
-    """Fetch recent klines from Binance public API."""
+# Global cache — loaded once from parquet, updated each cycle with new bars
+_cached_data: dict | None = None
+
+
+def fetch_recent_klines(symbol: str, interval: str, start_ms: int = 0, limit: int = 1000) -> pd.DataFrame:
+    """Fetch klines from Binance public API, optionally from a start time."""
     try:
-        resp = _requests.get(KLINES_URL, params={
-            "symbol": symbol, "interval": interval, "limit": limit,
-        }, timeout=15)
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
+        if start_ms > 0:
+            params["startTime"] = start_ms
+        resp = _requests.get(KLINES_URL, params=params, timeout=15)
         resp.raise_for_status()
         raw = resp.json()
+        if not raw:
+            return pd.DataFrame()
 
         df = pd.DataFrame(raw, columns=[
             "open_time", "open", "high", "low", "close", "volume",
@@ -169,48 +176,104 @@ def fetch_recent_klines(symbol: str, interval: str, limit: int = 500) -> pd.Data
         return pd.DataFrame()
 
 
-def fetch_live_data() -> dict:
-    """
-    Fetch latest candles for all 15 assets × 4 TFs.
-    Returns dict matching the format expected by scan_asset().
-    """
-    from backtest.data_loader import AssetData
+def _load_cache() -> dict:
+    """Load full historical data from parquet files (same as backtest engine)."""
+    from backtest.data_loader import load_all_assets
+    logger.info("Loading parquet cache (15 assets × 4 TFs)...")
+    t0 = time.perf_counter()
+    all_data = load_all_assets()
+    elapsed = time.perf_counter() - t0
+    total = sum(len(ad.close) for asset in all_data.values() for ad in asset.values())
+    logger.info("Cache loaded in %.1fs — %d total bars", elapsed, total)
+    return all_data
 
-    TFS = ["5m", "30m", "1h", "4h"]
-    LIMITS = {"5m": 2016, "30m": 500, "1h": 500, "4h": 500}
 
-    all_data = {}
+def _append_new_bars(all_data: dict) -> dict:
+    """
+    Fetch new bars from Binance since the last cached timestamp and append.
+    Recomputes PVT on the extended arrays.
+    """
+    from backtest.data_loader import AssetData, _compute_pvt, TIMEFRAMES
+
+    updated = 0
     for asset in ASSETS:
+        asset_data = all_data.get(asset, {})
         symbol = f"{asset}USDT"
-        asset_data = {}
-        for tf in TFS:
-            df = fetch_recent_klines(symbol, tf, limit=LIMITS[tf])
-            if df.empty:
+
+        for tf in TIMEFRAMES:
+            ad = asset_data.get(tf)
+            if ad is None:
                 continue
 
-            # Compute PVT
-            close_arr = df["close"].values
-            volume_arr = df["volume"].values
-            pvt = np.zeros(len(close_arr))
-            for i in range(1, len(close_arr)):
-                if close_arr[i - 1] > 0:
-                    pvt[i] = pvt[i - 1] + ((close_arr[i] - close_arr[i - 1]) / close_arr[i - 1]) * volume_arr[i]
+            # Last cached timestamp → fetch from next bar
+            last_ns = ad.timestamps[-1]
+            last_ms = last_ns // 1_000_000  # ns to ms
+            start_ms = last_ms + 1
+
+            df_new = fetch_recent_klines(symbol, tf, start_ms=start_ms, limit=1000)
+            if df_new.empty or len(df_new) == 0:
+                continue
+
+            # Convert new data to arrays
+            new_ts = df_new.index.values.astype("datetime64[ns]").astype("int64")
+
+            # Filter only bars strictly after last cached
+            mask = new_ts > last_ns
+            if not mask.any():
+                continue
+
+            new_close = df_new["close"].values[mask].astype(np.float64)
+            new_high = df_new["high"].values[mask].astype(np.float64)
+            new_low = df_new["low"].values[mask].astype(np.float64)
+            new_open = df_new["open"].values[mask].astype(np.float64)
+            new_vol = df_new["volume"].values[mask].astype(np.float64)
+            new_ts = new_ts[mask]
+
+            # Append to existing arrays
+            combined_close = np.concatenate([ad.close, new_close])
+            combined_high = np.concatenate([ad.high, new_high])
+            combined_low = np.concatenate([ad.low, new_low])
+            combined_open = np.concatenate([ad.open_, new_open])
+            combined_vol = np.concatenate([ad.volume, new_vol])
+            combined_ts = np.concatenate([ad.timestamps, new_ts])
+
+            # Recompute PVT on full array
+            combined_pvt = _compute_pvt(combined_close, combined_vol)
 
             asset_data[tf] = AssetData(
-                close=close_arr,
-                high=df["high"].values,
-                low=df["low"].values,
-                open_=df["open"].values,
-                volume=volume_arr,
-                timestamps=df.index.astype(np.int64).values,
-                pvt=pvt,
+                close=combined_close,
+                high=combined_high,
+                low=combined_low,
+                open_=combined_open,
+                volume=combined_vol,
+                timestamps=combined_ts,
+                pvt=combined_pvt,
             )
+            updated += len(new_close)
 
-        if asset_data:
-            all_data[asset] = asset_data
-        time.sleep(0.1)  # Rate limit
+        all_data[asset] = asset_data
+        time.sleep(0.05)  # Rate limit
 
-    return all_data
+    return all_data, updated
+
+
+def get_live_data() -> dict:
+    """
+    Get full dataset: parquet cache + latest bars from Binance.
+    Cache is loaded once on first call, then updated each cycle.
+    """
+    global _cached_data
+
+    if _cached_data is None:
+        _cached_data = _load_cache()
+
+    _cached_data, new_bars = _append_new_bars(_cached_data)
+    if new_bars > 0:
+        logger.info("Appended %d new bars from Binance", new_bars)
+    else:
+        logger.info("Cache up to date — no new bars")
+
+    return _cached_data
 
 
 def fetch_ticker_price(symbol: str) -> float | None:
@@ -798,12 +861,12 @@ class LiveBot:
         # Apply consensus params
         self._apply_params()
 
-        # Fetch live data
-        logger.info("Fetching live candles for %d assets...", len(ASSETS))
+        # Load cache + fetch new bars
+        logger.info("Updating data (parquet cache + new bars)...")
         t0 = time.perf_counter()
-        all_data = fetch_live_data()
+        all_data = get_live_data()
         elapsed = time.perf_counter() - t0
-        logger.info("Data fetched in %.1fs (%d assets loaded)", elapsed, len(all_data))
+        logger.info("Data ready in %.1fs (%d assets)", elapsed, len(all_data))
 
         # Check exits on open positions
         closed_this_cycle = set()
