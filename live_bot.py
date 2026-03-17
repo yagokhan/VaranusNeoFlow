@@ -474,9 +474,15 @@ class LiveBot:
         return False
 
     def _check_exits(self, all_data: dict):
-        """Check all open positions for exit conditions."""
+        """
+        Check all open positions for exit conditions.
+
+        Walks through ALL bars on the position's native TF since entry
+        (or since last check), exactly like the backtest engine.
+        A 5m position gets every 5m bar checked, not just the latest.
+        """
         from neo_flow.adaptive_engine import (
-            calc_log_regression, compute_trail_sl, compute_atr,
+            calc_log_regression, compute_trail_sl,
         )
 
         to_close = []
@@ -486,62 +492,82 @@ class LiveBot:
             if ad is None:
                 continue
 
-            pos.bars_held += 1
+            # Find bars since entry
+            entry_ns = int(pd.Timestamp(pos.entry_ts).value)
+            # Find first bar index after entry
+            start_idx = np.searchsorted(ad.timestamps, entry_ns, side="right")
+            # Skip bars we already checked (bars_held tracks how many we processed)
+            start_idx = start_idx + pos.bars_held
 
-            # Current price
-            current_price = float(ad.close[-1])
-            bar_high = float(ad.high[-1])
-            bar_low = float(ad.low[-1])
+            if start_idx >= len(ad.timestamps):
+                continue
 
-            # Update regression
-            if len(ad.close) >= pos.best_period:
-                std_dev, pearson_r, slope, intercept = calc_log_regression(
-                    ad.close, pos.best_period,
-                )
-                midline = np.exp(intercept)
-                pos.midline = midline
-                pos.std_dev = std_dev
-                pos.peak_r = max(pos.peak_r, abs(pearson_r))
-
-                # Update trailing stop
-                pos.trail_sl = compute_trail_sl(
-                    pos.direction, midline, std_dev,
-                    pos.trail_sl, self.params["trail_buffer"],
-                )
-                current_r = abs(pearson_r)
-            else:
-                current_r = 0.0
-
-            # Exit checks
             exit_reason = None
-            exit_price = current_price
+            exit_price = None
+            exit_idx = None
 
-            # Hard SL
-            if pos.direction == 1 and bar_low <= pos.hard_sl:
-                exit_reason = "HARD_SL_HIT"
-                exit_price = pos.hard_sl
-            elif pos.direction == -1 and bar_high >= pos.hard_sl:
-                exit_reason = "HARD_SL_HIT"
-                exit_price = pos.hard_sl
+            # Walk through every bar since last check
+            for idx in range(start_idx, len(ad.timestamps)):
+                pos.bars_held += 1
 
-            # Adaptive trail
-            if exit_reason is None:
-                if pos.direction == 1 and bar_low <= pos.trail_sl:
-                    exit_reason = "ADAPTIVE_TRAIL_HIT"
-                    exit_price = pos.trail_sl
-                elif pos.direction == -1 and bar_high >= pos.trail_sl:
-                    exit_reason = "ADAPTIVE_TRAIL_HIT"
-                    exit_price = pos.trail_sl
+                bar_high = float(ad.high[idx])
+                bar_low = float(ad.low[idx])
+                bar_close = float(ad.close[idx])
 
-            # Trend exhaustion
-            if exit_reason is None and current_r < self.params["exhaust_r"]:
-                exit_reason = "TREND_EXHAUSTION"
+                # Update regression + trailing stop
+                close_arr = ad.close[:idx + 1]
+                current_r = 0.0
+                if len(close_arr) >= pos.best_period:
+                    std_dev, pearson_r, slope, intercept = calc_log_regression(
+                        close_arr, pos.best_period,
+                    )
+                    midline = np.exp(intercept)
+                    pos.midline = midline
+                    pos.std_dev = std_dev
+                    pos.peak_r = max(pos.peak_r, abs(pearson_r))
 
-            # Time barrier
-            if exit_reason is None and pos.bars_held >= 200:
-                exit_reason = "TIME_BARRIER"
+                    pos.trail_sl = compute_trail_sl(
+                        pos.direction, midline, std_dev,
+                        pos.trail_sl, self.params["trail_buffer"],
+                    )
+                    current_r = abs(pearson_r)
 
-            if exit_reason:
+                # Hard SL (touch-based)
+                if pos.direction == 1 and bar_low <= pos.hard_sl:
+                    exit_reason = "HARD_SL_HIT"
+                    exit_price = pos.hard_sl
+                elif pos.direction == -1 and bar_high >= pos.hard_sl:
+                    exit_reason = "HARD_SL_HIT"
+                    exit_price = pos.hard_sl
+
+                # Adaptive trail (touch-based)
+                if exit_reason is None:
+                    if pos.direction == 1 and bar_low <= pos.trail_sl:
+                        exit_reason = "ADAPTIVE_TRAIL_HIT"
+                        exit_price = pos.trail_sl
+                    elif pos.direction == -1 and bar_high >= pos.trail_sl:
+                        exit_reason = "ADAPTIVE_TRAIL_HIT"
+                        exit_price = pos.trail_sl
+
+                # Trend exhaustion
+                if exit_reason is None and current_r > 0 and current_r < self.params["exhaust_r"]:
+                    exit_reason = "TREND_EXHAUSTION"
+                    exit_price = bar_close
+
+                # Time barrier
+                if exit_reason is None and pos.bars_held >= 200:
+                    exit_reason = "TIME_BARRIER"
+                    exit_price = bar_close
+
+                if exit_reason:
+                    exit_idx = idx
+                    break
+
+            if exit_reason and exit_price is not None:
+                logger.info(
+                    "EXIT %s at bar %d/%d: %s @ $%.4f (trail_sl=$%.4f)",
+                    asset, exit_idx, len(ad.timestamps), exit_reason, exit_price, pos.trail_sl,
+                )
                 to_close.append((asset, pos, exit_price, exit_reason))
 
         for asset, pos, exit_price, reason in to_close:
