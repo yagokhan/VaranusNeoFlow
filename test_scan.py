@@ -2,7 +2,7 @@
 """Quick test: run Neo-Flow scanner against v5.7.1 cached data."""
 import sys, warnings
 warnings.filterwarnings("ignore")
-sys.path.insert(0, "/home/gokhan/varanus_neo_flow")
+sys.path.insert(0, "/home/yagokhan/VaranusNeoFlow")
 
 import pandas as pd
 import numpy as np
@@ -12,7 +12,7 @@ from neo_flow.adaptive_engine import (
     scan_universe, print_scan_report, TIER2_UNIVERSE, SCAN_TIMEFRAMES,
 )
 
-CACHE = Path("/home/gokhan/varanus_v571/varanus/data/cache")
+CACHE = Path("/home/yagokhan/VaranusNeoFlow/data")
 
 def load_asset(asset: str) -> dict[str, pd.DataFrame]:
     """Load from v5.7.1 cache — 4h parquet + resample to 1h from 1h parquet."""

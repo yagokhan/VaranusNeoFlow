@@ -1,0 +1,304 @@
+{
+  "folds": [
+    {
+      "fold_id": 0,
+      "best_params": {
+        "min_pearson_r": 0.84,
+        "min_pvt_r": 0.85,
+        "combined_gate": 0.8,
+        "hard_sl_mult": 2.25,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.5,
+        "pos_frac": 0.05
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 1516,
+        "win_rate": 71.83377308707124,
+        "sharpe": 13.862294597255637,
+        "max_dd": -2.3322385999141773,
+        "pnl_pct": 515.4979775178763
+      },
+      "val": {
+        "trades": 1664,
+        "win_rate": 67.00721153846155,
+        "sharpe": 15.614136919918414,
+        "max_dd": -4.133502146095607,
+        "pnl_pct": 575.2639307185362
+      },
+      "test": {
+        "trades": 1490,
+        "win_rate": 69.73154362416108,
+        "sharpe": 14.173498204424178,
+        "max_dd": -5.3769884994414445,
+        "pnl_pct": 551.0591986540911
+      }
+    },
+    {
+      "fold_id": 1,
+      "best_params": {
+        "min_pearson_r": 0.81,
+        "min_pvt_r": 0.7,
+        "combined_gate": 0.7,
+        "hard_sl_mult": 2.5,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.35,
+        "pos_frac": 0.060000000000000005
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 1586,
+        "win_rate": 67.78058007566204,
+        "sharpe": 10.18353661108271,
+        "max_dd": -9.581233369913198,
+        "pnl_pct": 505.0930181094893
+      },
+      "val": {
+        "trades": 1572,
+        "win_rate": 66.15776081424937,
+        "sharpe": 13.698135096162485,
+        "max_dd": -5.102320509531725,
+        "pnl_pct": 706.384879188387
+      },
+      "test": {
+        "trades": 1707,
+        "win_rate": 68.54130052724078,
+        "sharpe": 16.642151945805953,
+        "max_dd": -4.268124299923545,
+        "pnl_pct": 737.6301899040942
+      }
+    },
+    {
+      "fold_id": 2,
+      "best_params": {
+        "min_pearson_r": 0.76,
+        "min_pvt_r": 0.8,
+        "combined_gate": 0.8,
+        "hard_sl_mult": 2.5,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.55,
+        "pos_frac": 0.05
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 1786,
+        "win_rate": 68.64501679731244,
+        "sharpe": 13.140940518242946,
+        "max_dd": -3.523067565672554,
+        "pnl_pct": 605.9197939601793
+      },
+      "val": {
+        "trades": 1656,
+        "win_rate": 69.20289855072464,
+        "sharpe": 13.895263740285365,
+        "max_dd": -12.183717424686414,
+        "pnl_pct": 554.4290872598496
+      },
+      "test": {
+        "trades": 1742,
+        "win_rate": 68.08266360505166,
+        "sharpe": 20.010358164102925,
+        "max_dd": -3.7536023022815597,
+        "pnl_pct": 935.2500898727274
+      }
+    },
+    {
+      "fold_id": 3,
+      "best_params": {
+        "min_pearson_r": 0.89,
+        "min_pvt_r": 0.8,
+        "combined_gate": 0.8,
+        "hard_sl_mult": 2.75,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.3,
+        "pos_frac": 0.05
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 1957,
+        "win_rate": 67.45017884517118,
+        "sharpe": 13.788622987337375,
+        "max_dd": -3.3435422624100624,
+        "pnl_pct": 672.9242695609412
+      },
+      "val": {
+        "trades": 1600,
+        "win_rate": 69.3125,
+        "sharpe": 11.387181660648219,
+        "max_dd": -8.6250903227927,
+        "pnl_pct": 615.0191184176496
+      },
+      "test": {
+        "trades": 1633,
+        "win_rate": 68.27924066135947,
+        "sharpe": 18.21774907061248,
+        "max_dd": -3.4562406525569993,
+        "pnl_pct": 988.9759769455186
+      }
+    },
+    {
+      "fold_id": 4,
+      "best_params": {
+        "min_pearson_r": 0.83,
+        "min_pvt_r": 0.85,
+        "combined_gate": 0.8,
+        "hard_sl_mult": 2.0,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.45,
+        "pos_frac": 0.05
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 2042,
+        "win_rate": 66.89520078354553,
+        "sharpe": 14.88793934805905,
+        "max_dd": -3.575091136989751,
+        "pnl_pct": 695.2764835636425
+      },
+      "val": {
+        "trades": 1670,
+        "win_rate": 69.7005988023952,
+        "sharpe": 16.494700515990733,
+        "max_dd": -4.748359416313361,
+        "pnl_pct": 563.2237229699502
+      },
+      "test": {
+        "trades": 1471,
+        "win_rate": 66.89326988443236,
+        "sharpe": 13.618532880874964,
+        "max_dd": -4.537293110278955,
+        "pnl_pct": 917.5615185282863
+      }
+    },
+    {
+      "fold_id": 5,
+      "best_params": {
+        "min_pearson_r": 0.83,
+        "min_pvt_r": 0.8,
+        "combined_gate": 0.8,
+        "hard_sl_mult": 2.25,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.4,
+        "pos_frac": 0.05
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 2305,
+        "win_rate": 67.41865509761388,
+        "sharpe": 11.647693891365057,
+        "max_dd": -9.114519613099214,
+        "pnl_pct": 775.6880918126172
+      },
+      "val": {
+        "trades": 1700,
+        "win_rate": 68.88235294117648,
+        "sharpe": 19.957516203434334,
+        "max_dd": -2.9205636594971627,
+        "pnl_pct": 951.758462154494
+      },
+      "test": {
+        "trades": 1380,
+        "win_rate": 67.3913043478261,
+        "sharpe": 12.391839079907761,
+        "max_dd": -8.401170878212438,
+        "pnl_pct": 629.4382463066116
+      }
+    },
+    {
+      "fold_id": 6,
+      "best_params": {
+        "min_pearson_r": 0.76,
+        "min_pvt_r": 0.6,
+        "combined_gate": 0.8,
+        "hard_sl_mult": 2.75,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.4,
+        "pos_frac": 0.060000000000000005
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 2269,
+        "win_rate": 68.40017628911414,
+        "sharpe": 12.91836337698884,
+        "max_dd": -8.035982014076113,
+        "pnl_pct": 1021.8759547543328
+      },
+      "val": {
+        "trades": 1636,
+        "win_rate": 67.29828850855746,
+        "sharpe": 17.27564111748859,
+        "max_dd": -7.205325941481703,
+        "pnl_pct": 1189.1607923150343
+      },
+      "test": {
+        "trades": 1538,
+        "win_rate": 68.14044213263979,
+        "sharpe": 9.79371530740354,
+        "max_dd": -8.086293490160793,
+        "pnl_pct": 668.2321771189695
+      }
+    },
+    {
+      "fold_id": 7,
+      "best_params": {
+        "min_pearson_r": 0.87,
+        "min_pvt_r": 0.55,
+        "combined_gate": 0.5,
+        "hard_sl_mult": 2.75,
+        "trail_buffer": 0.5,
+        "exhaust_r": 0.6000000000000001,
+        "pos_frac": 0.05
+      },
+      "n_trials": 100,
+      "train": {
+        "trades": 1923,
+        "win_rate": 65.36661466458659,
+        "sharpe": 10.224959060417163,
+        "max_dd": -8.475846903756752,
+        "pnl_pct": 560.5787549758277
+      },
+      "val": {
+        "trades": 1332,
+        "win_rate": 64.56456456456456,
+        "sharpe": 13.795975341121704,
+        "max_dd": -5.071591626910156,
+        "pnl_pct": 827.0295042375018
+      },
+      "test": {
+        "trades": 1188,
+        "win_rate": 66.41414141414141,
+        "sharpe": 7.615900388067366,
+        "max_dd": -8.437185691691235,
+        "pnl_pct": 468.632826244747
+      }
+    }
+  ],
+  "aggregate_test_metrics": {
+    "avg_win_rate": 67.93423827460657,
+    "avg_sharpe": 14.057968130149895,
+    "avg_max_dd": -5.789612365568371,
+    "avg_profit_factor": 4.610265328695517,
+    "total_trades": 12149,
+    "avg_trail_exit_pct": 99.1565869632092,
+    "avg_hard_sl_pct": 0.7961353299623126
+  },
+  "consensus_params": {
+    "min_pearson_r": 0.83,
+    "min_pvt_r": 0.8,
+    "combined_gate": 0.8,
+    "hard_sl_mult": 2.5,
+    "trail_buffer": 0.5,
+    "exhaust_r": 0.425,
+    "pos_frac": 0.05
+  },
+  "blind_test": {
+    "total_trades": 1097,
+    "win_rate": 70.73837739288969,
+    "total_pnl_pct": 381.1256455659678,
+    "sharpe_ratio": 12.598278368201223,
+    "max_drawdown_pct": -5.356860987792665,
+    "profit_factor": 4.509399480641739,
+    "trail_exit_pct": 99.179580674567,
+    "hard_sl_exit_pct": 0.8204193254329991
+  }
+}

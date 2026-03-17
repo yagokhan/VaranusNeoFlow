@@ -2,7 +2,7 @@
 """Test Neo-Flow engine against fetched historical data (5m, 30m, 1h, 4h)."""
 import sys, warnings, time
 warnings.filterwarnings("ignore")
-sys.path.insert(0, "/home/gokhan/varanus_neo_flow")
+sys.path.insert(0, "/home/yagokhan/VaranusNeoFlow")
 
 import pandas as pd
 import numpy as np
@@ -15,7 +15,7 @@ from neo_flow.adaptive_engine import (
     trim_to_7d, BARS_7D,
 )
 
-DATA_DIR = Path("/home/gokhan/varanus_neo_flow/data")
+DATA_DIR = Path("/home/yagokhan/VaranusNeoFlow/data")
 
 def load_asset(asset: str) -> dict[str, pd.DataFrame]:
     """Load all timeframes from fetched parquet files."""

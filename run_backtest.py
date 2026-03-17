@@ -28,7 +28,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-sys.path.insert(0, "/home/gokhan/varanus_neo_flow")
+sys.path.insert(0, "/home/yagokhan/VaranusNeoFlow")
 
 import pandas as pd
 
@@ -68,7 +68,9 @@ def main():
     parser.add_argument("--csv", type=str, default=None, help="Export trades to CSV file")
     parser.add_argument("--wfv", action="store_true", help="Run walk-forward validation (8 folds)")
     parser.add_argument("--optimize", action="store_true", help="Run Optuna optimization + WFV")
+    parser.add_argument("--fast", action="store_true", help="Use pre-computed feature store (much faster)")
     parser.add_argument("--n-trials", type=int, default=100, help="Optuna trials per fold (default: 100)")
+    parser.add_argument("--n-jobs", type=int, default=0, help="Parallel workers for WFV folds (0=auto, 1=sequential)")
     args = parser.parse_args()
 
     # Determine date range
@@ -98,8 +100,22 @@ def main():
     logger.info("Loading historical data...")
     all_data = load_all_assets()
 
-    if args.optimize:
-        # Full Optuna optimization + WFV
+    if args.optimize and args.fast:
+        # Fast Optuna optimization with pre-computed features + parallel folds
+        from neo_flow.precompute_features import precompute_all_features
+        from backtest.optimize_fast import run_wfv_fast
+        logger.info("Pre-computing feature store...")
+        features = precompute_all_features(all_data)
+        run_wfv_fast(
+            all_data=all_data,
+            features=features,
+            n_trials=args.n_trials,
+            scan_interval=args.scan_interval,
+            initial_capital=args.capital,
+            n_jobs=args.n_jobs,
+        )
+    elif args.optimize:
+        # Original Optuna optimization + WFV (slow)
         from backtest.optimize import run_wfv
         run_wfv(
             all_data=all_data,

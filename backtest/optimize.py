@@ -214,7 +214,7 @@ def run_wfv(
     n_trials: int = 100,
     scan_interval: int = 4,
     initial_capital: float = 10_000.0,
-    output_dir: str = "/home/gokhan/varanus_neo_flow",
+    output_dir: str = "/home/yagokhan/VaranusNeoFlow",
 ) -> WFVResult:
     """
     Run full walk-forward validation.
