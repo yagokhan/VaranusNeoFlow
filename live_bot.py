@@ -1174,7 +1174,7 @@ def main():
     parser = argparse.ArgumentParser(description="Varanus Neo-Flow — Live Trading Bot")
     parser.add_argument("--live", action="store_true", help="Enable live order execution (requires Binance keys)")
     parser.add_argument("--once", action="store_true", help="Run a single scan cycle and exit")
-    parser.add_argument("--interval", type=int, default=60, help="Scan interval in minutes (default: 60)")
+    parser.add_argument("--interval", type=int, default=5, help="Scan interval in minutes (default: 5)")
     parser.add_argument("--capital", type=float, default=10_000.0, help="Starting capital (default: 10000)")
     parser.add_argument("--reset-breaker", action="store_true", help="Reset circuit breaker")
     parser.add_argument("--status", action="store_true", help="Send status to Telegram and exit")
