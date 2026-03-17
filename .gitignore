@@ -6,3 +6,5 @@ binance.env
 telegram.env
 logs/
 *.parquet
+live_state.json
+live_trades.csv
