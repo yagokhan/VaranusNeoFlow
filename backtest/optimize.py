@@ -58,7 +58,7 @@ class WFVResult:
 def _create_objective(
     all_data: dict[str, dict[str, AssetData]],
     fold: WFVFold,
-    scan_interval: int = 4,
+    scan_interval: int = 1,
     initial_capital: float = 10_000.0,
 ):
     """Create an Optuna objective function for one fold."""
@@ -110,7 +110,7 @@ def optimize_fold(
     all_data: dict[str, dict[str, AssetData]],
     fold: WFVFold,
     n_trials: int = 100,
-    scan_interval: int = 4,
+    scan_interval: int = 1,
     initial_capital: float = 10_000.0,
 ) -> FoldResult:
     """
@@ -212,7 +212,7 @@ def compute_consensus_params(fold_results: list[FoldResult]) -> dict:
 def run_wfv(
     all_data: dict[str, dict[str, AssetData]] | None = None,
     n_trials: int = 100,
-    scan_interval: int = 4,
+    scan_interval: int = 1,
     initial_capital: float = 10_000.0,
     output_dir: str = "/home/yagokhan/VaranusNeoFlow",
 ) -> WFVResult:
