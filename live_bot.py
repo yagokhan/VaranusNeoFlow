@@ -104,7 +104,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-5s | %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stderr),
         logging.handlers.RotatingFileHandler(
             LOGS_DIR / "live_bot.log", maxBytes=10_000_000, backupCount=5,
         ),
@@ -1182,8 +1182,18 @@ def start_telegram_listener(bot: LiveBot):
         return
 
     def _poll():
-        offset = 0
-        logger.info("Telegram command listener started")
+        # Skip any messages that arrived before bot started
+        try:
+            resp = _requests.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+                params={"offset": -1, "timeout": 0}, timeout=10,
+            )
+            data = resp.json()
+            results = data.get("result", [])
+            offset = results[-1]["update_id"] + 1 if results else 0
+        except Exception:
+            offset = 0
+        logger.info("Telegram command listener started (offset=%d)", offset)
         while True:
             try:
                 url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
