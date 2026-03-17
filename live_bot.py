@@ -486,8 +486,9 @@ def append_trade_csv(trade: dict):
 class LiveBot:
     """Main live trading bot."""
 
-    def __init__(self, live_mode: bool = False, capital: float = 1_000.0, pos_frac: float = 0.10):
+    def __init__(self, live_mode: bool = False, capital: float = 1_000.0, pos_frac: float = 0.10, interval_minutes: int = 60):
         self.live_mode = live_mode
+        self.interval_minutes = interval_minutes
         self.state = load_state()
         self.state.initial_capital = capital
         self.state.total_scans = 0  # Reset scan counter on each startup
@@ -884,8 +885,28 @@ class LiveBot:
 
         # Summary
         equity = self.state.initial_capital + self.state.realized_pnl
+        n_open = len(self.state.positions)
         logger.info("Cycle complete — Equity: $%.0f | Realized PnL: $%.2f | Open: %d",
-                     equity, self.state.realized_pnl, len(self.state.positions))
+                     equity, self.state.realized_pnl, n_open)
+
+        # Telegram scan summary
+        next_scan = now + timedelta(minutes=self.interval_minutes)
+        mode_tag = "LIVE" if self.live_mode else "DRY-RUN"
+        summary = (
+            f"📡 <b>Scan #{self.state.total_scans}</b> [{mode_tag}]\n"
+            f"Time: {now.strftime('%Y-%m-%d %H:%M')} UTC\n"
+            f"Open: {n_open}/{MAX_CONCURRENT} | Equity: ${equity:,.0f}\n"
+        )
+        if n_open > 0:
+            for asset, pos in self.state.positions.items():
+                d = "LONG" if pos.direction == 1 else "SHORT"
+                summary += f"  • {asset} {d} @ ${pos.entry_price:.4f}\n"
+        if closed_this_cycle:
+            summary += f"Closed: {', '.join(closed_this_cycle)}\n"
+        if not self.state.positions and not closed_this_cycle:
+            summary += "No signals found\n"
+        summary += f"Next scan: {next_scan.strftime('%H:%M')} UTC"
+        tg_send(summary)
 
         save_state(self.state)
 
@@ -1255,7 +1276,7 @@ def main():
     parser.add_argument("--status", action="store_true", help="Send status to Telegram and exit")
     args = parser.parse_args()
 
-    bot = LiveBot(live_mode=args.live, capital=args.capital, pos_frac=args.pos_frac)
+    bot = LiveBot(live_mode=args.live, capital=args.capital, pos_frac=args.pos_frac, interval_minutes=args.interval)
 
     if args.reset_breaker:
         bot.state.circuit_breaker = False
