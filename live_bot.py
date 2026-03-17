@@ -486,12 +486,13 @@ def append_trade_csv(trade: dict):
 class LiveBot:
     """Main live trading bot."""
 
-    def __init__(self, live_mode: bool = False, capital: float = 10_000.0):
+    def __init__(self, live_mode: bool = False, capital: float = 1_000.0, pos_frac: float = 0.10):
         self.live_mode = live_mode
         self.state = load_state()
         self.state.initial_capital = capital
+        self.state.total_scans = 0  # Reset scan counter on each startup
 
-        # Apply consensus params
+        # Apply consensus params, override pos_frac from CLI
         self.params = {
             "min_pearson_r": CONSENSUS.get("min_pearson_r", 0.83),
             "min_pvt_r": CONSENSUS.get("min_pvt_r", 0.80),
@@ -499,11 +500,11 @@ class LiveBot:
             "hard_sl_mult": CONSENSUS.get("hard_sl_mult", 2.5),
             "trail_buffer": CONSENSUS.get("trail_buffer", 0.5),
             "exhaust_r": CONSENSUS.get("exhaust_r", 0.425),
-            "pos_frac": CONSENSUS.get("pos_frac", 0.05),
+            "pos_frac": pos_frac,
         }
 
-        logger.info("Bot initialized — mode=%s, capital=$%.0f",
-                     "LIVE" if live_mode else "DRY-RUN", capital)
+        logger.info("Bot initialized — mode=%s, capital=$%.0f, pos_frac=%.0f%%",
+                     "LIVE" if live_mode else "DRY-RUN", capital, pos_frac * 100)
         logger.info("Consensus params: %s", self.params)
 
     def _apply_params(self):
@@ -1238,12 +1239,13 @@ def main():
     parser.add_argument("--live", action="store_true", help="Enable live order execution (requires Binance keys)")
     parser.add_argument("--once", action="store_true", help="Run a single scan cycle and exit")
     parser.add_argument("--interval", type=int, default=60, help="Scan interval in minutes (default: 60)")
-    parser.add_argument("--capital", type=float, default=10_000.0, help="Starting capital (default: 10000)")
+    parser.add_argument("--capital", type=float, default=1_000.0, help="Starting capital (default: 1000)")
+    parser.add_argument("--pos-frac", type=float, default=0.10, help="Position fraction per trade (default: 0.10 = 10%%)")
     parser.add_argument("--reset-breaker", action="store_true", help="Reset circuit breaker")
     parser.add_argument("--status", action="store_true", help="Send status to Telegram and exit")
     args = parser.parse_args()
 
-    bot = LiveBot(live_mode=args.live, capital=args.capital)
+    bot = LiveBot(live_mode=args.live, capital=args.capital, pos_frac=args.pos_frac)
 
     if args.reset_breaker:
         bot.state.circuit_breaker = False
