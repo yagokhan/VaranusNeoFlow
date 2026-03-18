@@ -227,6 +227,11 @@ def main():
         m = compute_metrics(completed, engine.equity_curve, PARAMS.initial_capital)
         elapsed = time.perf_counter() - t0
 
+        # Export trades CSV for this offset
+        from backtest.metrics import trades_to_csv
+        csv_path = f"blind_test_offset_{offset:02d}min.csv"
+        trades_to_csv(completed, csv_path)
+
         results.append({
             "offset": offset,
             "trades": m.total_trades,
