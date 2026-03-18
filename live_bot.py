@@ -191,6 +191,7 @@ def _load_cache() -> dict:
 def _append_new_bars(all_data: dict) -> dict:
     """
     Fetch new bars from Binance since the last cached timestamp and append.
+    Paginates automatically if the gap exceeds 1000 bars (e.g. long downtime).
     Recomputes PVT on the extended arrays.
     """
     from backtest.data_loader import AssetData, _compute_pvt, TIMEFRAMES
@@ -207,27 +208,47 @@ def _append_new_bars(all_data: dict) -> dict:
 
             # Last cached timestamp → fetch from next bar
             last_ns = ad.timestamps[-1]
-            last_ms = last_ns // 1_000_000  # ns to ms
-            start_ms = last_ms + 1
+            cursor_ms = last_ns // 1_000_000 + 1  # ms, start after last cached
 
-            df_new = fetch_recent_klines(symbol, tf, start_ms=start_ms, limit=1000)
-            if df_new.empty or len(df_new) == 0:
+            all_close, all_high, all_low, all_open, all_vol, all_ts = [], [], [], [], [], []
+
+            # Paginate: fetch up to 1000 bars at a time until caught up
+            while True:
+                df_new = fetch_recent_klines(symbol, tf, start_ms=cursor_ms, limit=1000)
+                if df_new.empty or len(df_new) == 0:
+                    break
+
+                new_ts = df_new.index.values.astype("datetime64[ns]").astype("int64")
+                mask = new_ts > last_ns
+                if not mask.any():
+                    break
+
+                all_close.append(df_new["close"].values[mask].astype(np.float64))
+                all_high.append(df_new["high"].values[mask].astype(np.float64))
+                all_low.append(df_new["low"].values[mask].astype(np.float64))
+                all_open.append(df_new["open"].values[mask].astype(np.float64))
+                all_vol.append(df_new["volume"].values[mask].astype(np.float64))
+                all_ts.append(new_ts[mask])
+
+                last_ns = new_ts[-1]  # Update for next page filter
+
+                # If we got fewer than 1000, we're caught up
+                if len(df_new) < 1000:
+                    break
+
+                # Move cursor past last fetched bar
+                cursor_ms = int(new_ts[-1]) // 1_000_000 + 1
+                time.sleep(0.05)  # Rate limit between pages
+
+            if not all_close:
                 continue
 
-            # Convert new data to arrays
-            new_ts = df_new.index.values.astype("datetime64[ns]").astype("int64")
-
-            # Filter only bars strictly after last cached
-            mask = new_ts > last_ns
-            if not mask.any():
-                continue
-
-            new_close = df_new["close"].values[mask].astype(np.float64)
-            new_high = df_new["high"].values[mask].astype(np.float64)
-            new_low = df_new["low"].values[mask].astype(np.float64)
-            new_open = df_new["open"].values[mask].astype(np.float64)
-            new_vol = df_new["volume"].values[mask].astype(np.float64)
-            new_ts = new_ts[mask]
+            new_close = np.concatenate(all_close)
+            new_high = np.concatenate(all_high)
+            new_low = np.concatenate(all_low)
+            new_open = np.concatenate(all_open)
+            new_vol = np.concatenate(all_vol)
+            new_ts_arr = np.concatenate(all_ts)
 
             # Append to existing arrays
             combined_close = np.concatenate([ad.close, new_close])
@@ -235,7 +256,7 @@ def _append_new_bars(all_data: dict) -> dict:
             combined_low = np.concatenate([ad.low, new_low])
             combined_open = np.concatenate([ad.open_, new_open])
             combined_vol = np.concatenate([ad.volume, new_vol])
-            combined_ts = np.concatenate([ad.timestamps, new_ts])
+            combined_ts = np.concatenate([ad.timestamps, new_ts_arr])
 
             # Recompute PVT on full array
             combined_pvt = _compute_pvt(combined_close, combined_vol)
@@ -252,7 +273,7 @@ def _append_new_bars(all_data: dict) -> dict:
             updated += len(new_close)
 
         all_data[asset] = asset_data
-        time.sleep(0.05)  # Rate limit
+        time.sleep(0.05)  # Rate limit between assets
 
     return all_data, updated
 
@@ -272,6 +293,19 @@ def get_live_data() -> dict:
         logger.info("Appended %d new bars from Binance", new_bars)
     else:
         logger.info("Cache up to date — no new bars")
+
+    # Verify 7-day data integrity
+    BARS_7D = {"5m": 2016, "30m": 336, "1h": 168, "4h": 42}
+    now_ns = pd.Timestamp.now(tz="UTC").value
+    cutoff_ns = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=7)).value
+    for asset in list(ASSETS)[:1]:  # Spot-check first asset
+        for tf, needed in BARS_7D.items():
+            ad = _cached_data.get(asset, {}).get(tf)
+            if ad is None:
+                continue
+            recent = int(np.sum(ad.timestamps >= cutoff_ns))
+            if recent < needed:
+                logger.warning("DATA GAP: %s %s has %d/%d bars in 7-day window", asset, tf, recent, needed)
 
     return _cached_data
 
@@ -890,7 +924,7 @@ class LiveBot:
                      equity, self.state.realized_pnl, n_open)
 
         # Telegram scan summary
-        next_scan = now + timedelta(minutes=self.interval_minutes)
+        next_scan = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         mode_tag = "LIVE" if self.live_mode else "DRY-RUN"
         summary = (
             f"📡 <b>Scan #{self.state.total_scans}</b> [{mode_tag}]\n"
@@ -1262,6 +1296,68 @@ def start_telegram_listener(bot: LiveBot):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Price Monitor — checks hard SL & trail SL every 10 seconds
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def start_price_monitor(bot: LiveBot):
+    """Background thread that continuously monitors prices against SL levels."""
+
+    def _monitor():
+        logger.info("Price monitor started — checking SLs every 10s")
+        while True:
+            try:
+                if not bot.state.positions:
+                    time.sleep(10)
+                    continue
+
+                for asset, pos in list(bot.state.positions.items()):
+                    price = fetch_ticker_price(pos.symbol)
+                    if price is None:
+                        continue
+
+                    triggered = False
+
+                    # Hard SL check
+                    if pos.direction == 1 and price <= pos.hard_sl:
+                        logger.info("PRICE MONITOR: %s hard SL hit — price $%.4f <= SL $%.4f",
+                                    asset, price, pos.hard_sl)
+                        bot._close_trade(pos, pos.hard_sl, "HARD_SL_HIT")
+                        triggered = True
+                    elif pos.direction == -1 and price >= pos.hard_sl:
+                        logger.info("PRICE MONITOR: %s hard SL hit — price $%.4f >= SL $%.4f",
+                                    asset, price, pos.hard_sl)
+                        bot._close_trade(pos, pos.hard_sl, "HARD_SL_HIT")
+                        triggered = True
+
+                    # Trail SL check
+                    if not triggered:
+                        if pos.direction == 1 and price <= pos.trail_sl:
+                            logger.info("PRICE MONITOR: %s trail SL hit — price $%.4f <= trail $%.4f",
+                                        asset, price, pos.trail_sl)
+                            bot._close_trade(pos, pos.trail_sl, "ADAPTIVE_TRAIL_HIT")
+                            triggered = True
+                        elif pos.direction == -1 and price >= pos.trail_sl:
+                            logger.info("PRICE MONITOR: %s trail SL hit — price $%.4f >= trail $%.4f",
+                                        asset, price, pos.trail_sl)
+                            bot._close_trade(pos, pos.trail_sl, "ADAPTIVE_TRAIL_HIT")
+                            triggered = True
+
+                    if triggered:
+                        save_state(bot.state)
+
+                time.sleep(10)
+
+            except Exception as e:
+                logger.error("Price monitor error: %s", e)
+                time.sleep(10)
+
+    thread = threading.Thread(target=_monitor, daemon=True, name="price-monitor")
+    thread.start()
+    logger.info("Price monitor thread started")
+    return thread
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1271,7 +1367,7 @@ def main():
     parser.add_argument("--once", action="store_true", help="Run a single scan cycle and exit")
     parser.add_argument("--interval", type=int, default=60, help="Scan interval in minutes (default: 60)")
     parser.add_argument("--capital", type=float, default=1_000.0, help="Starting capital (default: 1000)")
-    parser.add_argument("--pos-frac", type=float, default=0.10, help="Position fraction per trade (default: 0.10 = 10%%)")
+    parser.add_argument("--pos-frac", type=float, default=0.05, help="Position fraction per trade (default: 0.05 = 5%%)")
     parser.add_argument("--reset-breaker", action="store_true", help="Reset circuit breaker")
     parser.add_argument("--status", action="store_true", help="Send status to Telegram and exit")
     args = parser.parse_args()
@@ -1295,7 +1391,7 @@ def main():
         f"🦎 <b>Varanus Neo-Flow Bot Started</b>\n\n"
         f"Mode: {mode}\n"
         f"Capital: ${args.capital:,.0f}\n"
-        f"Scan Interval: {args.interval} min\n"
+        f"Scan: every hour at :00 UTC\n"
         f"Assets: {len(ASSETS)}\n"
         f"Max Positions: {MAX_CONCURRENT}\n\n"
         f"Consensus Params:\n"
@@ -1311,6 +1407,9 @@ def main():
 
     # Start Telegram command listener
     start_telegram_listener(bot)
+
+    # Start price monitor (checks hard SL & trail SL every 10s)
+    start_price_monitor(bot)
 
     # Graceful shutdown
     running = True
@@ -1328,8 +1427,8 @@ def main():
         bot.run_cycle()
         return
 
-    # Main loop
-    logger.info("Starting scan loop — interval=%d min", args.interval)
+    # Main loop — scans aligned to the top of each hour (XX:00 UTC)
+    logger.info("Starting scan loop — aligned to :00 of each hour")
     while running:
         try:
             bot.run_cycle()
@@ -1340,11 +1439,12 @@ def main():
         if not running:
             break
 
-        # Sleep until next scan
-        next_scan = datetime.now(timezone.utc) + timedelta(minutes=args.interval)
-        logger.info("Next scan: %s", next_scan.strftime("%H:%M UTC"))
-        sleep_secs = args.interval * 60
-        for _ in range(sleep_secs):
+        # Sleep until next hour mark (XX:00 UTC)
+        now = datetime.now(timezone.utc)
+        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        sleep_secs = int((next_hour - now).total_seconds())
+        logger.info("Next scan: %s (sleeping %ds)", next_hour.strftime("%H:%M UTC"), sleep_secs)
+        for _ in range(sleep_secs + 1):
             if not running:
                 break
             time.sleep(1)
