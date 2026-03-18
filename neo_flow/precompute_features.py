@@ -592,12 +592,21 @@ def precompute_all_features(
 
     logger.info("Pre-computing features for %d 1h timestamps...", len(hourly_ns))
 
-    features = {}
-    for asset, asset_data in all_data.items():
-        t1 = time.perf_counter()
-        features[asset] = _precompute_asset(asset, asset_data, hourly_ns)
-        elapsed = time.perf_counter() - t1
-        logger.info("  %s: %.1fs", asset, elapsed)
+    try:
+        from joblib import Parallel, delayed
+        results = Parallel(n_jobs=-1)(
+            delayed(_precompute_asset)(asset, asset_data, hourly_ns)
+            for asset, asset_data in all_data.items()
+        )
+        features = dict(zip(all_data.keys(), results))
+    except ImportError:
+        logger.warning("joblib not found, falling back to sequential pre-computation")
+        features = {}
+        for asset, asset_data in all_data.items():
+            t1 = time.perf_counter()
+            features[asset] = _precompute_asset(asset, asset_data, hourly_ns)
+            elapsed = time.perf_counter() - t1
+            logger.info("  %s: %.1fs", asset, elapsed)
 
     total = time.perf_counter() - t0
     mem_mb = sum(f.nbytes for f in features.values()) / 1e6

@@ -4,3 +4,4 @@ requests>=2.28
 optuna>=3.5
 streamlit>=1.30
 plotly>=5.18
+joblib>=1.3
