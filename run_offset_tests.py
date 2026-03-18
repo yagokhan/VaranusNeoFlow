@@ -136,8 +136,8 @@ class OffsetBacktestEngine(BacktestEngine):
             if asset_data is None:
                 continue
 
-            scan_dfs = build_scan_dataframes(asset_data, scan_ns)
-            df_4h = build_htf_dataframe(asset_data, scan_ns)
+            scan_dfs = build_scan_dataframes(asset_data, scan_ns - 1)
+            df_4h = build_htf_dataframe(asset_data, scan_ns - 4 * 3600 * 10**9)
 
             if not scan_dfs or df_4h is None:
                 continue
@@ -158,7 +158,7 @@ class OffsetBacktestEngine(BacktestEngine):
                 continue
 
             ad = asset_data.get(signal.best_tf)
-            idx = find_bar_index(ad.timestamps, current_1h_ns)
+            idx = find_bar_index(ad.timestamps, current_1h_ns - 1)
             start_idx = max(0, idx - 20)
             atr_df = pd.DataFrame({
                 "high": ad.high[start_idx:idx + 1],

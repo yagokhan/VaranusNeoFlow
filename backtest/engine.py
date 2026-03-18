@@ -314,8 +314,11 @@ class BacktestEngine:
                 continue
 
             # Build scan DataFrames (7-day windows)
-            scan_dfs = build_scan_dataframes(asset_data, current_1h_ns)
-            df_4h = build_htf_dataframe(asset_data, current_1h_ns)
+            # Use current_1h_ns - 1 to exclude the bar opening at current_1h_ns
+            # (its HLCV isn't finalized yet — only the previous closed bar is safe)
+            scan_dfs = build_scan_dataframes(asset_data, current_1h_ns - 1)
+            # 4h bars span 4 hours; subtract a full 4h period to get the last CLOSED 4h bar
+            df_4h = build_htf_dataframe(asset_data, current_1h_ns - 4 * 3600 * 10**9)
 
             if not scan_dfs or df_4h is None:
                 continue
@@ -338,9 +341,9 @@ class BacktestEngine:
             if pos_usd <= 0 or lev == 0:
                 continue
 
-            # Hard SL based on ATR at entry
+            # Hard SL based on ATR at entry (use last closed bar, not current)
             ad = asset_data.get(signal.best_tf)
-            idx = find_bar_index(ad.timestamps, current_1h_ns)
+            idx = find_bar_index(ad.timestamps, current_1h_ns - 1)
             # Build small DF for ATR computation
             start_idx = max(0, idx - 20)
             atr_df = pd.DataFrame({

@@ -1428,7 +1428,17 @@ def main():
         return
 
     # Main loop — scans aligned to the top of each hour (XX:00 UTC)
-    logger.info("Starting scan loop — aligned to :00 of each hour")
+    # Wait for the next :00 before first scan
+    now = datetime.now(timezone.utc)
+    next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    wait_secs = int((next_hour - now).total_seconds())
+    logger.info("Waiting for first scan at %s (%ds)", next_hour.strftime("%H:%M UTC"), wait_secs)
+    tg_send(f"⏳ Waiting for first scan at {next_hour.strftime('%H:%M')} UTC ({wait_secs // 60}m {wait_secs % 60}s)")
+    for _ in range(wait_secs + 1):
+        if not running:
+            break
+        time.sleep(1)
+
     while running:
         try:
             bot.run_cycle()
