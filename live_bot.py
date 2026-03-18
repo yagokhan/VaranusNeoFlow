@@ -576,13 +576,25 @@ class LiveBot:
         """
         Check all open positions for exit conditions.
 
-        Walks through ALL bars on the position's native TF since entry
+        Walks through ALL CLOSED bars on the position's native TF since entry
         (or since last check), exactly like the backtest engine.
         A 5m position gets every 5m bar checked, not just the latest.
+        Excludes the latest bar if it hasn't closed yet (opened < now).
         """
         from neo_flow.adaptive_engine import (
             calc_log_regression, compute_trail_sl,
         )
+
+        # Compute cutoff: only process bars that have fully CLOSED
+        # A bar at timestamp T with duration D closes at T + D.
+        # We only include bars where T + D <= now.
+        now_ns = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+        TF_DURATION_NS = {
+            "5m": 5 * 60 * 10**9,
+            "30m": 30 * 60 * 10**9,
+            "1h": 3600 * 10**9,
+            "4h": 4 * 3600 * 10**9,
+        }
 
         to_close = []
 
@@ -591,6 +603,13 @@ class LiveBot:
             if ad is None:
                 continue
 
+            # Determine the last closed bar index for this TF
+            tf_dur = TF_DURATION_NS.get(pos.best_tf, 3600 * 10**9)
+            # Bar at index i is closed if ad.timestamps[i] + tf_dur <= now_ns
+            cutoff_ns = now_ns - tf_dur
+            last_closed_idx = np.searchsorted(ad.timestamps, cutoff_ns, side="right") - 1
+            end_idx = min(last_closed_idx + 1, len(ad.timestamps))
+
             # Find bars since entry
             entry_ns = int(pd.Timestamp(pos.entry_ts).value)
             # Find first bar index after entry
@@ -598,15 +617,15 @@ class LiveBot:
             # Skip bars we already checked (bars_held tracks how many we processed)
             start_idx = start_idx + pos.bars_held
 
-            if start_idx >= len(ad.timestamps):
+            if start_idx >= end_idx:
                 continue
 
             exit_reason = None
             exit_price = None
             exit_idx = None
 
-            # Walk through every bar since last check
-            for idx in range(start_idx, len(ad.timestamps)):
+            # Walk through every CLOSED bar since last check
+            for idx in range(start_idx, end_idx):
                 pos.bars_held += 1
 
                 bar_high = float(ad.high[idx])
@@ -737,11 +756,17 @@ class LiveBot:
         save_state(self.state)
 
     def _scan_and_enter(self, all_data: dict, skip_assets: set = None):
-        """Scan all assets and open positions for qualifying signals."""
+        """Scan all assets and open positions for qualifying signals.
+
+        Uses clock-derived scan_ns (top of the hour) and applies
+        closed-bar offsets identical to the backtest engine:
+          - scan_dfs: scan_ns - 1  (excludes bar opening at scan_ns)
+          - df_4h:    scan_ns - 4h (uses last CLOSED 4h bar)
+        """
         from neo_flow.adaptive_engine import (
             scan_asset, compute_atr, compute_hard_sl, get_leverage,
         )
-        from backtest.data_loader import build_scan_dataframes, build_htf_dataframe
+        from backtest.data_loader import build_scan_dataframes, build_htf_dataframe, find_bar_index
 
         skip_assets = skip_assets or set()
 
@@ -751,6 +776,13 @@ class LiveBot:
 
         signals_found = []
         now = datetime.now(timezone.utc)
+
+        # Compute scan reference time: the top of the current hour (HH:00:00 UTC)
+        # This mirrors the backtest's current_1h_ns which is the 1h bar OPEN time.
+        # At HH:00:01, the bar that opened at (H-1):00 just closed at HH:00.
+        # scan_ns = HH:00:00 in nanoseconds, same as backtest's bar_timestamps[i].
+        scan_ns = int(now.replace(minute=0, second=0, microsecond=0).timestamp() * 1_000_000_000)
+        _4H_NS = 4 * 3600 * 10**9
 
         for asset in ASSETS:
             if asset in self.state.positions:
@@ -765,14 +797,24 @@ class LiveBot:
             if asset_data is None:
                 continue
 
-            # Build scan DataFrames using latest 1h timestamp
             ad_1h = asset_data.get("1h")
             if ad_1h is None or len(ad_1h.timestamps) == 0:
                 continue
 
-            current_ns = ad_1h.timestamps[-1]
-            scan_dfs = build_scan_dataframes(asset_data, current_ns)
-            df_4h = build_htf_dataframe(asset_data, current_ns)
+            # SYNC_CHECK: verify data alignment
+            data_last_ns = ad_1h.timestamps[-1]
+            data_last_ts = pd.Timestamp(data_last_ns, tz="UTC")
+            scan_ts = pd.Timestamp(scan_ns, tz="UTC")
+            logger.info(
+                "[SYNC_CHECK] %s | scan_ns=%s | data_last_1h=%s | delta=%ds",
+                asset, scan_ts.strftime("%H:%M:%S"),
+                data_last_ts.strftime("%H:%M:%S"),
+                (scan_ns - data_last_ns) / 1_000_000_000,
+            )
+
+            # Build scan DataFrames — closed-bar logic (mirrors backtest engine)
+            scan_dfs = build_scan_dataframes(asset_data, scan_ns - 1)
+            df_4h = build_htf_dataframe(asset_data, scan_ns - _4H_NS)
 
             if not scan_dfs or df_4h is None:
                 continue
@@ -904,6 +946,23 @@ class LiveBot:
         elapsed = time.perf_counter() - t0
         logger.info("Data ready in %.1fs (%d assets)", elapsed, len(all_data))
 
+        # SYNC_CHECK: verify scan trigger vs data alignment
+        scan_hour = now.replace(minute=0, second=0, microsecond=0)
+        ref_ad = None
+        for ad_map in all_data.values():
+            ref_ad = ad_map.get("1h")
+            if ref_ad is not None:
+                break
+        if ref_ad is not None:
+            data_last = pd.Timestamp(ref_ad.timestamps[-1], tz="UTC")
+            expected_last = scan_hour - timedelta(hours=1)  # last closed 1h bar
+            delta = (data_last - expected_last).total_seconds()
+            logger.info(
+                "[SYNC_CHECK] Scan triggered at: %s | Data last_1h: %s | Expected: %s | Delta: %.0fs",
+                now.strftime("%H:%M:%S UTC"), data_last.strftime("%H:%M:%S"),
+                expected_last.strftime("%H:%M:%S"), delta,
+            )
+
         # Check exits on open positions
         closed_this_cycle = set()
         if self.state.positions:
@@ -924,7 +983,7 @@ class LiveBot:
                      equity, self.state.realized_pnl, n_open)
 
         # Telegram scan summary
-        next_scan = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        next_scan = now.replace(minute=0, second=1, microsecond=0) + timedelta(hours=1)
         mode_tag = "LIVE" if self.live_mode else "DRY-RUN"
         summary = (
             f"📡 <b>Scan #{self.state.total_scans}</b> [{mode_tag}]\n"
@@ -1391,7 +1450,7 @@ def main():
         f"🦎 <b>Varanus Neo-Flow Bot Started</b>\n\n"
         f"Mode: {mode}\n"
         f"Capital: ${args.capital:,.0f}\n"
-        f"Scan: every hour at :00 UTC\n"
+        f"Scan: every hour at :00:01 UTC (closed-bar)\n"
         f"Assets: {len(ASSETS)}\n"
         f"Max Positions: {MAX_CONCURRENT}\n\n"
         f"Consensus Params:\n"
@@ -1427,13 +1486,13 @@ def main():
         bot.run_cycle()
         return
 
-    # Main loop — scans aligned to the top of each hour (XX:00 UTC)
-    # Wait for the next :00 before first scan
+    # Main loop — scans at HH:00:01 UTC (1s after the hour to ensure bar is closed)
+    # Wait for the next :00:01 before first scan
     now = datetime.now(timezone.utc)
-    next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    wait_secs = int((next_hour - now).total_seconds())
-    logger.info("Waiting for first scan at %s (%ds)", next_hour.strftime("%H:%M UTC"), wait_secs)
-    tg_send(f"⏳ Waiting for first scan at {next_hour.strftime('%H:%M')} UTC ({wait_secs // 60}m {wait_secs % 60}s)")
+    next_trigger = now.replace(minute=0, second=1, microsecond=0) + timedelta(hours=1)
+    wait_secs = int((next_trigger - now).total_seconds())
+    logger.info("Waiting for first scan at %s (%ds)", next_trigger.strftime("%H:%M:%S UTC"), wait_secs)
+    tg_send(f"⏳ Waiting for first scan at {next_trigger.strftime('%H:%M:%S')} UTC ({wait_secs // 60}m {wait_secs % 60}s)")
     for _ in range(wait_secs + 1):
         if not running:
             break
@@ -1449,11 +1508,11 @@ def main():
         if not running:
             break
 
-        # Sleep until next hour mark (XX:00 UTC)
+        # Sleep until next HH:00:01 UTC
         now = datetime.now(timezone.utc)
-        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        sleep_secs = int((next_hour - now).total_seconds())
-        logger.info("Next scan: %s (sleeping %ds)", next_hour.strftime("%H:%M UTC"), sleep_secs)
+        next_trigger = now.replace(minute=0, second=1, microsecond=0) + timedelta(hours=1)
+        sleep_secs = int((next_trigger - now).total_seconds())
+        logger.info("Next scan: %s (sleeping %ds)", next_trigger.strftime("%H:%M:%S UTC"), sleep_secs)
         for _ in range(sleep_secs + 1):
             if not running:
                 break
