@@ -65,7 +65,7 @@ TF_MS = {
 #   Training (8-fold WFV): 2023-01-01 → 2025-10-31
 #   Blind Test:            2025-11-01 → 2026-03-15
 GLOBAL_START = datetime(2023, 1, 1, tzinfo=timezone.utc)
-GLOBAL_END   = datetime(2026, 3, 15, 23, 59, 59, tzinfo=timezone.utc)
+GLOBAL_END   = datetime(2026, 3, 19, 15, 0, 0, tzinfo=timezone.utc)
 
 # Binance public API
 KLINES_URL   = "https://api.binance.com/api/v3/klines"

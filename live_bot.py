@@ -130,11 +130,13 @@ def tg_send(text: str, parse_mode: str = "HTML"):
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        _requests.post(url, json={
+        resp = _requests.post(url, json={
             "chat_id": TELEGRAM_CHAT_ID,
             "text": text,
             "parse_mode": parse_mode,
         }, timeout=10)
+        resp.raise_for_status()
+        logger.info("Telegram message sent successfully")
     except Exception as e:
         logger.error("Telegram send failed: %s", e)
 
@@ -1296,17 +1298,7 @@ def start_telegram_listener(bot: LiveBot):
         return
 
     def _poll():
-        # Skip any messages that arrived before bot started
-        try:
-            resp = _requests.get(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
-                params={"offset": -1, "timeout": 0}, timeout=10,
-            )
-            data = resp.json()
-            results = data.get("result", [])
-            offset = results[-1]["update_id"] + 1 if results else 0
-        except Exception:
-            offset = 0
+        offset = 0
         logger.info("Telegram command listener started (offset=%d)", offset)
         while True:
             try:
@@ -1321,22 +1313,31 @@ def start_telegram_listener(bot: LiveBot):
                     msg = update.get("message", {})
                     chat_id = str(msg.get("chat", {}).get("id", ""))
                     text = msg.get("text", "").strip().lower()
+                    
+                    if chat_id:
+                        logger.info("Incoming message from chat_id: %s, text: %s", chat_id, text)
 
                     # Only respond to our chat
                     if chat_id != TELEGRAM_CHAT_ID:
                         continue
 
                     if text in ("/status", "status"):
+                        logger.info("Executing /status command")
                         bot.send_status()
                     elif text in ("/positions", "/pos", "positions"):
+                        logger.info("Executing /positions command")
                         bot.send_positions()
                     elif text in ("/pnl", "pnl", "/profit", "profit"):
+                        logger.info("Executing /pnl command")
                         bot.send_pnl()
                     elif text in ("/today", "today"):
+                        logger.info("Executing /today command")
                         bot.send_today()
                     elif text in ("/params", "params", "/parameters"):
+                        logger.info("Executing /params command")
                         bot.send_params()
                     elif text in ("/help", "help", "/start"):
+                        logger.info("Executing /help command")
                         bot.send_help()
                     elif text:
                         tg_send(
@@ -1482,41 +1483,39 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    if args.once:
+    # Startup scan (Immediate)
+    logger.info("Performing initial startup scan...")
+    try:
         bot.run_cycle()
+    except Exception as e:
+        logger.error("Initial scan error: %s\n%s", e, traceback.format_exc())
+        tg_send(f"⚠️ <b>INITIAL SCAN ERROR</b>\n{e}")
+
+    if args.once:
         return
 
     # Main loop — scans at HH:00:01 UTC (1s after the hour to ensure bar is closed)
-    # Wait for the next :00:01 before first scan
-    now = datetime.now(timezone.utc)
-    next_trigger = now.replace(minute=0, second=1, microsecond=0) + timedelta(hours=1)
-    wait_secs = int((next_trigger - now).total_seconds())
-    logger.info("Waiting for first scan at %s (%ds)", next_trigger.strftime("%H:%M:%S UTC"), wait_secs)
-    tg_send(f"⏳ Waiting for first scan at {next_trigger.strftime('%H:%M:%S')} UTC ({wait_secs // 60}m {wait_secs % 60}s)")
-    for _ in range(wait_secs + 1):
+    while running:
+        # Sleep until next HH:00:01 UTC
+        now = datetime.now(timezone.utc)
+        next_trigger = now.replace(minute=0, second=1, microsecond=0) + timedelta(hours=1)
+        sleep_secs = int((next_trigger - now).total_seconds())
+        
+        if sleep_secs > 0:
+            logger.info("Waiting for next scan at %s (%ds)", next_trigger.strftime("%H:%M:%S UTC"), sleep_secs)
+            for _ in range(sleep_secs + 1):
+                if not running:
+                    break
+                time.sleep(1)
+        
         if not running:
             break
-        time.sleep(1)
 
-    while running:
         try:
             bot.run_cycle()
         except Exception as e:
             logger.error("Cycle error: %s\n%s", e, traceback.format_exc())
             tg_send(f"⚠️ <b>CYCLE ERROR</b>\n{e}")
-
-        if not running:
-            break
-
-        # Sleep until next HH:00:01 UTC
-        now = datetime.now(timezone.utc)
-        next_trigger = now.replace(minute=0, second=1, microsecond=0) + timedelta(hours=1)
-        sleep_secs = int((next_trigger - now).total_seconds())
-        logger.info("Next scan: %s (sleeping %ds)", next_trigger.strftime("%H:%M:%S UTC"), sleep_secs)
-        for _ in range(sleep_secs + 1):
-            if not running:
-                break
-            time.sleep(1)
 
     save_state(bot.state)
     logger.info("Bot stopped.")
